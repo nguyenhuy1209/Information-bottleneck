@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 
 import scipy.io as sio
 import numpy as np
+np.random.seed(5)
 import pickle
 from sklearn import neighbors
 
@@ -81,7 +82,7 @@ def calc_IB_combained_second(p_t_given_x, pxs, pys, p_y_given_x, beta, iter, p_x
             #pts_emp = np.dot(p_t_given_x_emp, p_x_emp)
 
         p_yx = np.multiply(p_y_given_x, np.tile(pxs, (p_y_given_x.shape[0], 1)))
-        p_t_given_x_divide_p_t= np.multiply(probTgivenXs, np.tile(1. / (pts_emp+np.spacing(1)), (probTgivenXs.shape[1], 1)).T)
+        p_t_given_x_divide_p_t = np.multiply(probTgivenXs, np.tile(1. / (pts_emp+np.spacing(1)), (probTgivenXs.shape[1], 1)).T)
         PYgivenTs_update_s = np.dot(p_yx[:,sampled_indexes],p_t_given_x_divide_p_t[:,sampled_indexes].T)
         PYgivenTs_update_s[PYgivenTs_update_s<np.exp(-40)]=0
         PYgivenTs_update_before = PYgivenTs_update_s / np.tile(np.nansum(PYgivenTs_update_s, axis=0), (PYgivenTs_update_s.shape[0], 1))
@@ -178,23 +179,26 @@ def calc_IB_combained_third(p_t_given_x, pxs, pys, p_y_given_x, beta, iter, p_x_
     return probTgivenXs, PYgivenTs_update, pts_emp, pxs
 
 
-def calc_IB(p_t_x, PXs, PYgivenXs, beta, iter):
-    PYgivenXs = PYgivenXs.astype(np.longdouble)
-    PXs = PXs.astype(np.longdouble)
-    p_t_x = p_t_x.astype(np.longdouble)
-    probTgivenXs = p_t_x
+def calc_IB(PTgivenX, PX, PYgivenX, beta, iter):
+    PYgivenX = PYgivenX.astype(np.longdouble)
+    PX = PX.astype(np.longdouble)
+    PTgivenX = PTgivenX.astype(np.longdouble)
+
     for i in range(0, iter):
-        pts = np.dot(probTgivenXs, PXs)
-        ProbYGivenT_b = np.multiply(PYgivenXs, np.tile(PXs, (PYgivenXs.shape[0], 1)))
-        PYgivenTs_update = np.dot(ProbYGivenT_b,
-                                  np.multiply(probTgivenXs, np.tile(1. / (pts), (probTgivenXs.shape[1], 1)).T).T)
-        d1 = np.tile(np.nansum(np.multiply(PYgivenXs, np.log(PYgivenXs)), axis=0), (probTgivenXs.shape[0], 1))
-        d2 = np.dot(-np.log(PYgivenTs_update.T + np.spacing(1)), PYgivenXs)
+        PT = np.dot(PTgivenX, PX)
+        PYgivenT_b = np.multiply(PYgivenX, np.tile(PX, (PYgivenX.shape[0], 1)))
+        PYgivenT_update = np.dot(PYgivenT_b,
+                                  np.multiply(PTgivenX, np.tile(1. / (PT), (PTgivenX.shape[1], 1)).T).T)
+        
+        
+        d1 = np.tile(np.nansum(np.multiply(PYgivenX, np.log(PYgivenX)), axis=0), (PTgivenX.shape[0], 1))
+        d2 = np.dot(-np.log(PYgivenT_update.T + np.spacing(1)), PYgivenX)
         DKL = d1 + d2
-        probTgivenXs = np.exp(-beta * (DKL)) * pts[:, np.newaxis]
-        probTgivenXs = probTgivenXs / np.tile(np.nansum(probTgivenXs, axis=0), (probTgivenXs.shape[0], 1))
-    pts = np.dot(probTgivenXs, PXs)
-    return probTgivenXs, PYgivenTs_update, pts
+        
+        PTgivenX = np.exp(-beta * (DKL)) * PT[:, np.newaxis]
+        PTgivenX = PTgivenX / np.tile(np.nansum(PTgivenX, axis=0), (PTgivenX.shape[0], 1))
+    PT = np.dot(PTgivenX, PX)
+    return PTgivenX, PYgivenT_update, PT
 
 
 """Deprecated"""
@@ -230,31 +234,38 @@ def calcXI(probTgivenXs, PYgivenTs, PXs, PYs):
 
 def load_temp_data(name, initial_beta=0.9, max_beta=100, interval_beta=0.5):
     d = sio.loadmat(name + '.mat')
-    y = d['y']
-    # print(y)
-    # print(1 - y[None, :])
+    y = d['y'] # P(Y=0|X)
     
-    PYX = np.squeeze(np.concatenate((y[None, :], 1 - y[None, :]), axis=0))
-    PXs = np.ones(PYX.shape[1]) / PYX.shape[1]
-    PXs = PXs[:]
-    PXs = PXs / np.sum(PXs)
-    PYX = PYX[:, :PXs.shape[0]]
+    #  P(Y|X)
+    PYgivenX = np.concatenate((y, 1-y), axis=0)
+
+    # P(X)
+    PX = np.ones(PYgivenX.shape[1]) / PYgivenX.shape[1] # shape (4096, ) P(X) is a uniform distribution 
+
     mybetaS = 2 ** np.arange(np.log2(initial_beta), np.log2(max_beta), interval_beta)
-    mybetaS = mybetaS[::-1]
-    to_add =np.random.rand(len(mybetaS))*2 - 1
-    #to_add1 =np.random.rand(len(mybetaS))*2 - 1
+    mybetaS = mybetaS[::-1] # reverse, from ascending to descending
 
-    #print np.max(to_add), np.min(to_add),np.max(to_add1), np.min(to_add1)
+    # add some random noise to betas
+    # to_add = np.random.rand(len(mybetaS))*2 - 1
+    # to_add1 = np.random.rand(len(mybetaS))*2 - 1
+    # print np.max(to_add), np.min(to_add),np.max(to_add1), np.min(to_add1)
+    # mybetaS = np.abs(mybetaS+mybetaS*to_add)
 
-    #mybetaS = np.abs(mybetaS+mybetaS*to_add)
-    PTX0 = np.eye(PXs.shape[0])
-    PYs = np.mean(y)
-    PYs = np.vstack(np.array([PYs, 1 - PYs]))
+    # P(T|X) initially
+    PTgivenX0 = np.eye(PX.shape[0]) 
+
+    PY = np.mean(y) # P(Y=0) = mean of P(Y=0|X)?
+    PY = np.vstack(np.array([PY, 1 - PY])) # P(Y)
     F = d['F']
-    return mybetaS, np.squeeze(PTX0), np.squeeze(PXs), np.squeeze(PYX), np.squeeze(PYs), F
+
+    # PTgivenX0: P(T|X)
+    # PX: P(X)
+    # PYgivenX: P(Y|X)
+    # PY: P(Y)
+    return mybetaS, np.squeeze(PTgivenX0), np.squeeze(PX), np.squeeze(PYgivenX), np.squeeze(PY), F
 
 
-def loadData(name='data/all'):
+def load_data(name='data/all'):
     d = sio.loadmat(name + '.mat')
     what_to_do = d['what_to_do'][0]
     pertub_probS = d['pertub_probS'][0]
@@ -265,13 +276,12 @@ def loadData(name='data/all'):
     return what_to_do, pertub_probS, temperatureS
 
 
-def do_IB_iteation(pxs, pys, p_t_given_x, p_y_given_x, beta, iter):
+def do_IB_iteation(PX, PY, PTgivenX, PYgivenX, beta, iter):
     """Regulear IB iteration"""
-    probTgivenXs, PYgivenTs_update, pts = calc_IB(p_t_given_x, pxs, p_y_given_x, beta, iter)
-    ITX, IYT = iu.calc_information(probTgivenXs, PYgivenTs_update, pxs, pys, pts)
+    PTgivenX_update, PYgivenT_update, PT = calc_IB(PTgivenX, PX, PYgivenX, beta, iter)
+    ITX, IYT = iu.calc_information(PTgivenX_update, PYgivenT_update, PX, PY, PT)
     L = ITX - beta * IYT
-    # print ITX, IYT
-    return ITX, IYT, L, probTgivenXs, PYgivenTs_update, pts
+    return ITX, IYT, L, PTgivenX_update, PYgivenT_update, PT
 
 
 def do_IB_iteation_combained(pxs, pys, p_tx, pyx, beta, iter, p_x_emp, p_t_given_x_emp, p_ygiven_x_emp,
@@ -340,15 +350,15 @@ def do_IB_iteation_combained(pxs, pys, p_tx, pyx, beta, iter, p_x_emp, p_t_given
         ind], L, p_t_given_x_comb_new_0, p_y_given_t_comb_0, pts_comb_0, p_t_given_x_comb_new_0, p_y_given_t_comb_0, pts_comb_0, ITXs, IYYs, pxs
 
 
-def do_annealing(x, y, PCX0, PYX, ITER, beta, what_to_do, pertub_probS, temperatureS):
+def do_annealing(x, y, PTgivenX0, PYgivenX, ITER, beta, what_to_do, pertub_probS, temperatureS):
     Ls = []  # list of Lagrangian values
     # Keep track of best over all
     bbL = 9999999999
-    bbPCX, bbPTY, bbPTC, bbPYC = [], [], [], []
+    bbPTgivenX, bbPYgivenT = [], []
     cnt = 0  # count all iterations...
-    PCX = PCX0
-    ITERsmall = 3
-    ITERpertub = 1
+    PTgivenX = PTgivenX0
+    ITERsmall = 5
+    ITERpertub = 3
 
     for temperature in temperatureS:
         for pertub_prob in pertub_probS:
@@ -356,47 +366,46 @@ def do_annealing(x, y, PCX0, PYX, ITER, beta, what_to_do, pertub_probS, temperat
             while (iter <= ITER):
                 cnt = cnt + 1
                 # Run current solution
-                IXT, ITY, L, PCX, PYC, PTs = do_IB_iteation(
-                    x, y, PCX, PYX, beta, ITERsmall)
+                IXT, ITY, L, PTgivenX, PYgivenT, PT = do_IB_iteation(
+                    x, y, PTgivenX, PYgivenX, beta, ITERsmall)
                 iter = iter + ITERsmall
-                # Pertub solution and run once
-                Z = np.random.rand(PCX.shape[0], PCX.shape[1])
-                Z = np.divide(Z, np.tile(np.sum(Z, axis=0), (Z.shape[0], 1)))
-                PCX1 = (1 - pertub_prob) * PCX + pertub_prob * Z
-                PCX1 = np.divide(PCX1, np.tile(np.sum(PCX1,axis=0), (PCX1.shape[0], 1)))
+                # Pertub solution and run once more
+                Z = np.random.rand(PTgivenX.shape[0], PTgivenX.shape[1])
+                Z = np.divide(Z, np.tile(np.sum(Z, axis=0), (Z.shape[0], 1))) # normalize on T axis
+                PTgivenX1 = (1 - pertub_prob) * PTgivenX + pertub_prob * Z
+                PTgivenX1 = np.divide(PTgivenX1, np.tile(np.sum(PTgivenX1, axis=0), (PTgivenX1.shape[0], 1))) # normalize on T axis
 
                 if (pertub_prob > 0.15) and (pertub_prob <= 0.7):
-                    nn = np.random.randint(PCX1.shape[1])
-                    PCX1[np.random.permutation(PCX1.shape[0]), nn]
-                IXT1, ITY1, L1, PCX1, PYC1, PTs1 = do_IB_iteation(x, y, PCX1, PYX, beta, ITERpertub)
+                    nn = np.random.randint(PTgivenX1.shape[1])
+                    PTgivenX1[np.random.permutation(PTgivenX1.shape[0]), nn]
+                IXT1, ITY1, L1, PTgivenX1, PYgivenT1, PT1 = do_IB_iteation(x, y, PTgivenX1, PYgivenT, beta, ITERpertub)
                 iter = iter + ITERpertub
                 # Local search move
                 if L1 <= L:
-                    # print (IXT1, ITY1)
-
-                    PCX = PCX1
-                    PYC = PYC1
-                    PTs = PTs1
+                    print('something is better than L')
+                    PTgivenX = PTgivenX1
+                    PYgivenT = PYgivenT1
+                    PT = PT1
                     L = L1
                 if L < bbL:
-                    # print (IXT, ITY)
-                    # print ("3")
-                    bbPCX = PCX
-                    bbPYC = PYC
-                    bbPTs = PTs
+                    bbPTgivenX = PTgivenX
+                    bbPYgivenT = PYgivenT
+                    bbPT = PT
                     bbL = L
                 if L1 > L:
                     if np.random.rand(1) < np.exp((L - L1) / temperature):
-                        PCX = PCX1
-                        PYC = PYC1
-                        PTs = PTs1
+                        PTgivenX = PTgivenX1
+                        PYgivenT = PYgivenT1
+                        PT = PT1
                         L = L1
                 Ls = [Ls, L]
-    return bbPCX, bbPYC, bbPTs, bbL, Ls, IXT, ITY
+    return bbPTgivenX, bbPYgivenT, bbPT, bbL, Ls, IXT, ITY
+
 
 def find_nearest(array,value):
     idx = (np.abs(array-value)).argmin()
     return idx
+
 
 def choosen_method(method_type,not_mask_indexes,PXs,mask,emp_x_indeces, F, k_neighbors, p_y_given_x):
     if method_type ==0:
@@ -425,6 +434,7 @@ def choosen_method(method_type,not_mask_indexes,PXs,mask,emp_x_indeces, F, k_nei
         #choosen_indeces = np.array(choosen_indeces)
     return choosen_indeces
 
+
 def calc_decoder(probTgivenXs, PXs, PYgivenXs):
     pts = np.dot(probTgivenXs, PXs)
     ProbYGivenT_b = np.multiply(PYgivenXs, np.tile(PXs, (PYgivenXs.shape[0], 1)))
@@ -433,7 +443,7 @@ def calc_decoder(probTgivenXs, PXs, PYgivenXs):
     return PYgivenTs_update
 
 
-def cluster_xs(PXs, PYC_emp,PYgivenXs,PTs_emp,beta ):
+def cluster_xs(PXs, PYC_emp, PYgivenXs, PTs_emp, beta):
     d1 = np.tile(np.nansum(np.multiply(PYgivenXs, np.log(PYgivenXs)), axis=0), (PTs_emp.shape[0], 1))
     d2 = np.dot(-np.log(PYC_emp.T + np.spacing(1)), PYgivenXs)
     DKL = d1 + d2
@@ -441,6 +451,7 @@ def cluster_xs(PXs, PYC_emp,PYgivenXs,PTs_emp,beta ):
     probTgivenXs = probTgivenXs / np.tile(np.nansum(probTgivenXs, axis=0), (probTgivenXs.shape[0], 1))
     pts = np.dot(probTgivenXs, PXs)
     return probTgivenXs, pts
+
 
 def run_annealing(mybetaS, PTX0, PXs, PYX, PYs, what_to_do, pertub_probS, temperatureS, ITER, emp_x_indeces, ind,initial_beta,interval_beta, max_beta, F,
                   method_type =0,k_neighbors =5 ):
@@ -460,8 +471,8 @@ def run_annealing(mybetaS, PTX0, PXs, PYX, PYs, what_to_do, pertub_probS, temper
 
     PYX_rand[:, not_mask_indexes] = np.random.rand(PYX_rand.shape[0],len(not_mask_indexes)).astype(np.longdouble)
     PYX_rand = PYX_rand / np.sum(PYX_rand, axis=0)[np.newaxis,:]
-    emp_PYs = np.dot(emp_PYX,emp_PXs ).astype(np.longdouble)
-    PCX_emp = np.eye(emp_PXs.shape[0]).astype(np.longdouble)
+    emp_PYs = np.dot(emp_PYX, emp_PXs).astype(np.longdouble)
+    PCX_emp = np.eye(emp_PXs.shape[0]).astype(np.longdouble) # for simulation?
 
     for k in range(0, NB):
         mybeta = mybetaS[k]
@@ -484,64 +495,76 @@ def run_annealing(mybetaS, PTX0, PXs, PYX, PYs, what_to_do, pertub_probS, temper
         k+=1
     return ICXs, IYCs,ICXs_all,IYCs_all
 
-def run_annealing_tries(mybetaS, PTX0, PXs, PYX, PYs, what_to_do, pertub_probS, temperatureS, ITER, emp_x_indeces, ind,initial_beta,interval_beta, max_beta, F,
+
+def run_annealing_tries(mybetaS, PTX0, PX, PYgivenX, PYs, what_to_do, pertub_probS, temperatureS, ITER, emp_x_indeces, ind, initial_beta, interval_beta, max_beta, F,
                   method_type=0, k_neighbors=5):
     NB = len(mybetaS)
     PCXs, PYCs, ICXs, IYCs, PTs_all, ICXs_all, IYCs_all = [], [], [], [], [],[],[]
 
-    emp_PXs = PXs[emp_x_indeces].astype(np.longdouble) # sample a subset of X
-    emp_PXs = emp_PXs / np.sum(emp_PXs) # probability of probabilities?
-
-    emp_PYX = PYX[:, emp_x_indeces].astype(np.longdouble)
-    PYX_rand = np.array(PYX, copy=True)
+    # Empirical sample X
+    emp_PX = PX[emp_x_indeces].astype(np.longdouble) # sample a subset of X
+    emp_PX = emp_PX / np.sum(emp_PX) # normalize so that sum of P(empirical X) = 1
     
-    mask = np.zeros((PXs.shape[0]), dtype=bool)  # np.ones_like(a,dtype=bool)
+    # Empirical sample of P(Y|X)
+    emp_PYgivenX = PYgivenX[:, emp_x_indeces].astype(np.longdouble)
+    PYgivenX_rand = np.array(PYgivenX, copy=True)
+    
+    mask = np.zeros((PX.shape[0]), dtype=bool)  # np.ones_like(a, dtype=bool)
     mask[emp_x_indeces] = True
     # mask = mask[:, 0]
 
-    # s = np.argwhere(~mask)
-    # not_mask_indexes = [si[0] for si in s]
-    not_mask_indexes = np.argwhere(~mask)[:, 0].tolist()
+    s = np.argwhere(~mask)
+    not_mask_indexes = [si[0] for si in s]
 
-    PYX_rand[:, not_mask_indexes] = np.random.rand(PYX_rand.shape[0], len(not_mask_indexes)).astype(np.longdouble)
-    PYX_rand = PYX_rand / np.sum(PYX_rand, axis=0)[np.newaxis,:] # normalize in X
+    PYgivenX_rand[:, not_mask_indexes] = np.random.rand(PYgivenX_rand.shape[0], len(not_mask_indexes)).astype(np.longdouble)
+    PYgivenX_rand = PYgivenX_rand / np.sum(PYgivenX_rand, axis=0)[np.newaxis,:] # normalize in X
 
-    emp_PYs = np.dot(emp_PYX, emp_PXs).astype(np.longdouble)
-    PCX_emp = np.eye(emp_PXs.shape[0]).astype(np.longdouble)
+    emp_PY = np.dot(emp_PYgivenX, emp_PX).astype(np.longdouble)
+    emp_PTgivenX = np.eye(emp_PX.shape[0]).astype(np.longdouble) # identity matrix of (4096,4096)
 
     for k in range(0, NB):
         mybeta = mybetaS[k]
-        print ('Running beta ={0:.2f}, indexs {1} from b -  {2}'.format (mybeta, k, NB))
-
-        #[PCX_emp, PYC_emp, PTs_emp, bL, Ls, ICX, IYC] = do_annealing(emp_PXs,emp_PYs , PCX_emp, emp_PYX, ITER, mybeta,
-        [PCX_emp, PYC_emp, PTs_emp, bL, Ls, ICX, IYC] = do_annealing(emp_PXs, emp_PYs, PCX_emp, emp_PYX, ITER, mybeta,
+        print ('Running beta = {0:.2f}, indexs {1} from b -  {2}'.format (mybeta, k, NB))
+        [emp_PTgivenX, emp_PYgivenT, emp_PT, _, _, ICX, IYC] = do_annealing(emp_PX, emp_PY, emp_PTgivenX, emp_PYgivenX, ITER, mybeta,
                                                                                   what_to_do,
                                                                                   pertub_probS, temperatureS)
         #PCXs.append(PCX)
         #PYCs.append(PYC)
         #PTs_all.append(PTs)
-        PYC_emp_n =np.random.rand(PYX.shape[0],PYX.shape[1] )
-        PYC_emp_n = PYC_emp_n / np.sum(PYC_emp_n, axis=0)[np.newaxis, :]
-        #PYC_emp_n = PYX_rand
-        PYC_emp_n[:, emp_x_indeces] = PYC_emp
-        PTs = np.random.rand(PXs.shape[0])
-        PTs = PTs / np.sum(PTs)
-        PTs[emp_x_indeces] = PTs_emp
-        PTs = PTs / np.sum(PTs)
+        PYC_emp_n = np.random.rand(PYgivenX.shape[0], PYgivenX.shape[1])
+        PYC_emp_n = PYC_emp_n / np.sum(PYC_emp_n, axis=0)[np.newaxis, :] # normalize
+        #PYC_emp_n = PYgivenX_rand
+        PYC_emp_n[:, emp_x_indeces] = emp_PYgivenT
+        PT = np.random.rand(PX.shape[0])
+        PT = PT / np.sum(PT) # normalize
+        PT[emp_x_indeces] = emp_PT
+        PT = PT / np.sum(PT) # normalize
 
+        # PTgivenX_all, PT = cluster_xs(PX, emp_PYgivenT, PYgivenX_rand, emp_PT, mybeta)
+        # PX: distribution of real X
+        # PYC_emp_n: randomize P(Y|T) on the whole dataset, which some Ts are from the empirical P(Y|T)
+        # PYgivenX_rand: randomize P(Y|X) on the whole dataset, which some Xs are from the empirical P(Y|X)
+        # PT: randomize P(T) on the whole dataset, which some Ts are from the empirical P(T)
+        # mybeta: given any beta
+        # => encoder P(T|X) for the whole dataset, and new PT
+        PTgivenX_all, PT = cluster_xs(PX, PYC_emp_n, PYgivenX_rand, PT, mybeta)
 
-        #p_t_given_x_all,pts = cluster_xs(PXs, PYC_emp,PYX_rand,PTs_emp, mybeta)
-        p_t_given_x_all, pts = cluster_xs(PXs, PYC_emp_n, PYX_rand, PTs, mybeta)
-        p_t_given_x_all[:, emp_x_indeces] = 0
+        # set empirical P(T|X) to zero?
+        PTgivenX_all[:, emp_x_indeces] = 0
+        # print(emp_x_indeces)
+        # raise
         for k in range(emp_x_indeces.shape[0]):
-            p_t_given_x_all[emp_x_indeces[k], emp_x_indeces] = PCX_emp[k,:]
-        p_y_given_t_all = calc_decoder(p_t_given_x_all, PXs, PYX)
-        p_t_given_x_all,pts = cluster_xs(PXs, p_y_given_t_all, PYX_rand, pts, mybeta)
-        pys = np.dot(p_y_given_t_all, pts)
+            # emp_x_indeces[k]: index of each empirical T
+            # emp_x_indeces: index of all empirical X
+            # 
+            PTgivenX_all[emp_x_indeces[k], emp_x_indeces] = emp_PTgivenX[k,:]
+        PYgivenT_all = calc_decoder(PTgivenX_all, PX, PYgivenX)
+        PTgivenX_all, PT = cluster_xs(PX, PYgivenT_all, PYgivenX_rand, PT, mybeta)
+        PY = np.dot(PYgivenT_all, PT)
 
-        #ITX_all, IYT_all = iu.calc_information(p_t_given_x_all.astype(np.longdouble), p_y_given_t_all.astype(np.longdouble), PXs.astype(np.longdouble), PYs.astype(np.longdouble), PTs_emp.astype(np.longdouble))
-        ITX_all, IYT_all = iu.calc_information(p_t_given_x_all.astype(np.longdouble), PYC_emp_n.astype(np.longdouble), PXs.astype(np.longdouble), pys.astype(np.longdouble), pts.astype(np.longdouble))
 
+        # ITX_all, IYT_all = iu.calc_information(PTgivenX_all.astype(np.longdouble), PYgivenT_all.astype(np.longdouble), PX.astype(np.longdouble), PYs.astype(np.longdouble), emp_PT.astype(np.longdouble))
+        ITX_all, IYT_all = iu.calc_information(PTgivenX_all.astype(np.longdouble), PYC_emp_n.astype(np.longdouble), PX.astype(np.longdouble), PY.astype(np.longdouble), PT.astype(np.longdouble))
         print('Final information - ', ICX, IYC, ITX_all, IYT_all)
 
         ICXs.append(ICX)
@@ -553,20 +576,20 @@ def run_annealing_tries(mybetaS, PTX0, PXs, PYX, PYs, what_to_do, pertub_probS, 
     return ICXs, IYCs, ICXs_all, IYCs_all
 
 
-def main_from_source(mybetaS, PTX0, PXs, PYX, PYs, emp_x_indeces, ind, initial_beta,interval_beta, max_beta, F,  method_type, k_neighbors, ITER=20):
-    what_to_do, pertub_probS, temperatureS = loadData()
-    [ICX, IYC, ICX_all, IYC_all] = run_annealing_tries(mybetaS, PTX0, PXs, PYX, PYs, what_to_do, pertub_probS, temperatureS, ITER,
-                                         emp_x_indeces, ind,initial_beta,interval_beta, max_beta,F,method_type, k_neighbors)
+def main_from_source(mybetaS, PTgivenX0, PX, PYgivenX, PY, emp_x_indeces, ind, initial_beta, interval_beta, max_beta, F, method_type, k_neighbors, ITER=20):
+    what_to_do, pertub_probS, temperatureS = load_data()
+    [ICX, IYC, ICX_all, IYC_all] = run_annealing_tries(mybetaS, PTgivenX0, PX, PYgivenX, PY, what_to_do, pertub_probS, temperatureS, ITER,
+                                         emp_x_indeces, ind, initial_beta, interval_beta, max_beta, F, method_type, k_neighbors)
     return ICX, IYC, ICX_all, IYC_all
 
 
-def calc_reverase_annleaing(name, num_of_indices, ind, method_type, k_neighbors, max_beta,initial_beta = 0.8,interval_beta =0.1):
-    np.random.seed(None)
-    [mybetaS, PTX0, PXs, PYX, PYs, F] = load_temp_data(name, max_beta=max_beta, initial_beta=initial_beta, interval_beta=interval_beta)
-    emp_x_indeces = np.sort(np.random.choice(PTX0.shape[0], num_of_indices, replace=False)) # PTX0.shape[0]: unique value of T, in this case is 4096
-    [ICX, IYC,ICX_all, IYC_all] = main_from_source(mybetaS, PTX0, PXs, PYX, PYs, emp_x_indeces, ind, initial_beta, interval_beta, max_beta, F,
+def calc_reverase_annleaing(name, num_of_indices, ind, method_type, k_neighbors, max_beta, initial_beta=0.8, interval_beta=0.1):
+    # np.random.seed(2)
+    [mybetaS, PTgivenX0, PX, PYgivenX, PY, F] = load_temp_data(name, max_beta=max_beta, initial_beta=initial_beta, interval_beta=interval_beta)
+    emp_x_indeces = np.sort(np.random.choice(PTgivenX0.shape[0], num_of_indices, replace=False)) # PTX0.shape[0]: unique value of T, in this case is 4096
+    [ICX, IYC, ICX_all, IYC_all] = main_from_source(mybetaS, PTgivenX0, PX, PYgivenX, PY, emp_x_indeces, ind, initial_beta, interval_beta, max_beta, F,
                                   method_type, k_neighbors)
-    return np.array(ICX), np.array(IYC),np.array(ICX_all), np.array(IYC_all)
+    return np.array(ICX), np.array(IYC), np.array(ICX_all), np.array(IYC_all)
 
 
 def main():

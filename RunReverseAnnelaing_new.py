@@ -3,14 +3,10 @@ warnings.filterwarnings("ignore")
 import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
-# from ib import reverese_annealing as ra
 from ib import reverese_annealing_new as ra_n
-# import scipy.io as sio
 import numpy as np
-# from joblib import Parallel, delayed
 import multiprocessing
 NUM_CORES = multiprocessing.cpu_count()
-#matplotlib.use('Agg')
 import pickle
 import argparse
 
@@ -35,8 +31,8 @@ def plot_figure(name):
         y = total_data[0][1]
         x1 = total_data[0][2]
         y1 = total_data[0][3]
-        y1 = y1 / np.max(y)
-        y = y / np.max(y)
+        # y1 = y1 / np.max(y)
+        # y = y / np.max(y)
         ax.plot(x, y, ':', color='r', alpha=1)
         ax.scatter(x1, y1, color='g', alpha=.5)
         #ax.set_xlim([0,12])
@@ -48,18 +44,10 @@ def plot_figure(name):
 def main(args):
     name = 'data/regular_90'
     str_name = 'reg_90_s9'
-    save_probs = False
-    ICX_array = []
-    IYC_array = []
-    num_of_indices = 1500
     ind = 2
-    #num_of_indices_array_init = [20]
-    num_of_indices_array_init = np.linspace(10, 100, num=40, dtype= np.int32)[:]
-    num_of_indices_array_init = [4]
-    #print NUM_CORES
+    
+    num_of_indices_array_init = [4] # how many percentage of data is used as empirical data
     num_of_indices_array = np.array([round(i / float(100) * 4096) for i in num_of_indices_array_init]).astype(np.int32)
-    # print(num_of_indices_array)
-    # raise
     total_data = []
     num_of_repeat = 2
     method_type = 1
@@ -67,11 +55,11 @@ def main(args):
     #total_data = Parallel(n_jobs=1)(delayed(ra.calc_reverase_annleaing)(name, num_of_indices_array[0], ind, max_beta)
     #                                for i in range(0, num_of_repeat))
 
-    for i in range(0,num_of_repeat):
+    for i in range(0, num_of_repeat):
         print ('Trial number {0}'.format(i))
         #arrays = Parallel(n_jobs=NUM_CORES)(delayed(ra.calc_reverase_annleaing)(name,num_of_indices, ind,method_type, k_neighbors,max_beta)
         #                                for num_of_indices in num_of_indices_array)
-        arrays = [ra_n.calc_reverase_annleaing(name, num_of_indices, method_type, k_neighbors,  ind, args.max_beta)
+        arrays = [ra_n.calc_reverase_annleaing(name, num_of_indices, method_type, k_neighbors, ind, args.max_beta)
             for num_of_indices in num_of_indices_array]
         with open(str_name+str(ind)+'_'+str(i)+'.pickle', 'wb') as f:
             pickle.dump([arrays], f)
@@ -108,5 +96,5 @@ if __name__ == "__main__":
     if args.run_IB:
         main(args)
     else:
-        plot_figure('data/regular_90_informationCurve1.pickle')
+        plot_figure('data/reg_90_s92_total_.pickle')
     plt.show()
